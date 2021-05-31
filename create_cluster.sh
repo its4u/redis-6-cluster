@@ -11,6 +11,6 @@ oc exec -t ${DATABASE_SERVICE_NAME}-master-0 -n $PROJECT -c redis-master -- /bin
 for NODE in 0 1 2
 do
   MASTER_IP=$(oc get pod $DATABASE_SERVICE_NAME-master-${NODE} -n $PROJECT -o go-template='{{.status.podIP}}')
-  SLAVE_IP=$(oc get pod $DATABASE_SERVICE_NAME-slave-${NODE} -n $1PROJECT -o go-template='{{.status.podIP}}')
+  SLAVE_IP=$(oc get pod $DATABASE_SERVICE_NAME-slave-${NODE} -n $PROJECT -o go-template='{{.status.podIP}}')
   oc exec -t ${DATABASE_SERVICE_NAME}-master-${NODE} -n $PROJECT -c redis-master -- /bin/bash -c "/usr/bin/redis-cli --cluster add-node ${SLAVE_IP}:6379 ${MASTER_IP}:6379 --cluster-slave -a ${REDIS_PASSWORD}"
 done
