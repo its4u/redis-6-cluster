@@ -1,0 +1,403 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+labels:
+  template: redis-6-cluster
+message: |-
+  The following service(s) have been created in your project: ${DATABASE_SERVICE_NAME}.
+
+         Password: ${REDIS_PASSWORD}
+   Connection URL: redis://${DATABASE_SERVICE_NAME}:6379/
+
+  For more information about using this template, including OpenShift considerations, see https://github.com/sclorg/redis-container/blob/master/5.
+metadata:
+  annotations:
+    description: |-
+      Redis in-memory data structure store, without persistent storage. For more information about using this template, including OpenShift considerations, see https://github.com/sclorg/redis-container/blob/master/5.
+
+      WARNING: Any data stored will be lost upon pod destruction. Only use this template for testing
+    iconClass: icon-redis
+    openshift.io/display-name: Redis 6 Cluster
+    openshift.io/documentation-url: https://github.com/sclorg/redis-container/tree/master/6
+    openshift.io/long-description: This template provides a Redis 6 cluster using StatefulSets for both master and slave.  The data is stored on persistent storage.
+    openshift.io/provider-display-name: Red Hat, Inc.
+    openshift.io/support-url: https://access.redhat.com
+    samples.operator.openshift.io/version: 4.7.8
+    tags: database,redis
+  labels:
+    samples.operator.openshift.io/managed: "false"
+  name: redis-6-cluster
+  namespace: openshift
+objects:
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    annotations:
+      template.openshift.io/expose-password: '{.data[''database-password'']}'
+    name: ${DATABASE_SERVICE_NAME}
+  stringData:
+    database-password: ${REDIS_PASSWORD}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}-master-headless
+    labels:
+      app: ${DATABASE_SERVICE_NAME}-master
+      role: master
+  spec:
+    ports:
+      - name: redis-master
+        protocol: TCP
+        port: 6379
+        targetPort: 6379
+    selector:
+      app: ${DATABASE_SERVICE_NAME}-master
+      role: master
+    clusterIP: None
+    clusterIPs:
+      - None
+    type: ClusterIP
+    sessionAffinity: None
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}-master
+    labels:
+      app: ${DATABASE_SERVICE_NAME}-master
+      role: master
+  spec:
+    ports:
+      - name: redis-master
+        protocol: TCP
+        port: 6379
+        targetPort: 6379
+    selector:
+      app: ${DATABASE_SERVICE_NAME}-master
+      role: master
+    type: ClusterIP
+    sessionAffinity: None
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}-slave-headless
+    labels:
+      app: ${DATABASE_SERVICE_NAME}-slave
+      role: slave
+  spec:
+    ports:
+      - name: redis-slave
+        protocol: TCP
+        port: 6379
+        targetPort: 6379
+    selector:
+      app: ${DATABASE_SERVICE_NAME}-slave
+      role: slave
+    clusterIP: None
+    clusterIPs:
+      - None
+    type: ClusterIP
+    sessionAffinity: None
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}-slave
+    labels:
+      app: ${DATABASE_SERVICE_NAME}-slave
+      role: slave
+  spec:
+    ports:
+      - name: redis-slave
+        protocol: TCP
+        port: 6379
+        targetPort: 6379
+    selector:
+      app: ${DATABASE_SERVICE_NAME}-slave
+      role: slave
+    type: ClusterIP
+    sessionAffinity: None
+  status:
+    loadBalancer: {}
+- apiVersion: v1
+  data:
+    run-redis: |
+      #!/bin/bash
+
+      export_vars=$(cgroup-limits); export $export_vars
+      source ${CONTAINER_SCRIPTS_PATH}/common.sh
+      set -eu
+
+      [ -f ${CONTAINER_SCRIPTS_PATH}/validate-variables.sh ] && source ${CONTAINER_SCRIPTS_PATH}/validate-variables.sh
+
+      # Process the Redis configuration files
+      log_info 'Processing Redis configuration files ...'
+      if [[ -v REDIS_PASSWORD ]]; then
+        envsubst < ${CONTAINER_SCRIPTS_PATH}/password.conf.template >> /etc/redis.conf
+      else
+        log_info 'WARNING: setting REDIS_PASSWORD is recommended'
+      fi
+
+      if [[ "${SERVER_MODE}" == "master" || "${SERVER_MODE}" == "slave" ]]; then
+        echo "cluster-enabled yes" >> /etc/redis.conf
+      fi
+
+      # Source post-init source if exists
+      if [ -f ${CONTAINER_SCRIPTS_PATH}/post-init.sh ]; then
+        log_info 'Sourcing post-init.sh ...'
+        source ${CONTAINER_SCRIPTS_PATH}/post-init.sh
+      fi
+
+      # Restart the Redis server with public IP bindings
+      unset_env_vars
+      log_volume_info "${REDIS_DATADIR}"
+      log_info 'Running final exec -- Only Redis logs after this point'
+      exec ${REDIS_PREFIX}/bin/redis-server /etc/redis.conf --daemonize no "$@" 2>&1
+  kind: ConfigMap
+  metadata:
+    name: run-redis
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}-master
+    labels:
+      app: ${DATABASE_SERVICE_NAME}-master
+      role: master
+  spec:
+    replicas: ${CLUSTER_SIZE}
+    selector:
+      matchLabels:
+        app: ${DATABASE_SERVICE_NAME}-master
+        role: master
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          app: ${DATABASE_SERVICE_NAME}-master
+          role: master
+      spec:
+        volumes:
+        - name: run-redis
+          configMap:
+            name: run-redis
+            defaultMode: 365
+        containers:
+          - resources:
+              limits:
+                cpu: 100m
+                memory: 128Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-i'
+                  - '-c'
+                  - test "$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)" == "PONG"
+              initialDelaySeconds: 5
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            terminationMessagePath: /dev/termination-log
+            name: redis-master
+            livenessProbe:
+              tcpSocket:
+                port: 6379
+              initialDelaySeconds: 30
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            env:
+              - name: SERVER_MODE
+                value: master
+              - name: REDIS_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: redis
+                    key: database-password
+              - name: SETUP_MODE
+                value: cluster
+              - name: PERSISTENCE_ENABLED
+                value: 'true'
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - name: ${DATABASE_SERVICE_NAME}-master
+                mountPath: /var/lib/redis/data/
+              - name: run-redis
+                mountPath: /usr/bin/run-redis
+                subPath: run-redis
+            terminationMessagePolicy: File
+            image: 'registry.redhat.io/rhel8/redis-6:latest'
+        restartPolicy: Always
+        terminationGracePeriodSeconds: 30
+        dnsPolicy: ClusterFirst
+        securityContext: {}
+        schedulerName: default-scheduler
+    volumeClaimTemplates:
+      - kind: PersistentVolumeClaim
+        apiVersion: v1
+        metadata:
+          name: ${DATABASE_SERVICE_NAME}-master
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+          volumeMode: Filesystem
+    serviceName: ${DATABASE_SERVICE_NAME}-master
+    podManagementPolicy: OrderedReady
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        partition: 0
+    revisionHistoryLimit: 10
+- apiVersion: apps/v1
+  kind: StatefulSet
+  metadata:
+    name: ${DATABASE_SERVICE_NAME}-slave
+    labels:
+      app: ${DATABASE_SERVICE_NAME}-slave
+      role: slave
+  spec:
+    replicas: ${CLUSTER_SIZE}
+    selector:
+      matchLabels:
+        app: ${DATABASE_SERVICE_NAME}-slave
+        role: slave
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          app: ${DATABASE_SERVICE_NAME}-slave
+          role: slave
+      spec:
+        volumes:
+        - name: run-redis
+          configMap:
+            name: run-redis
+            defaultMode: 365
+        containers:
+          - resources:
+              limits:
+                cpu: 100m
+                memory: 128Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-i'
+                  - '-c'
+                  - test "$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)" == "PONG"
+              initialDelaySeconds: 5
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            terminationMessagePath: /dev/termination-log
+            name: redis-slave
+            livenessProbe:
+              tcpSocket:
+                port: 6379
+              initialDelaySeconds: 30
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            env:
+              - name: SERVER_MODE
+                value: slave
+              - name: REDIS_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: redis
+                    key: database-password
+              - name: SETUP_MODE
+                value: cluster
+              - name: PERSISTENCE_ENABLED
+                value: 'true'
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - name: ${DATABASE_SERVICE_NAME}-slave
+                mountPath: /var/lib/redis/data/
+              - name: run-redis
+                mountPath: /usr/bin/run-redis
+                subPath: run-redis
+            terminationMessagePolicy: File
+            image: 'registry.redhat.io/rhel8/redis-6:latest'
+        restartPolicy: Always
+        terminationGracePeriodSeconds: 30
+        dnsPolicy: ClusterFirst
+        securityContext: {}
+        schedulerName: default-scheduler
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis
+          defaultMode: 420
+    volumeClaimTemplates:
+      - kind: PersistentVolumeClaim
+        apiVersion: v1
+        metadata:
+          name: ${DATABASE_SERVICE_NAME}-slave
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: ${PERSISTENT_SIZE}
+          volumeMode: Filesystem
+    serviceName: ${DATABASE_SERVICE_NAME}-slave
+    podManagementPolicy: OrderedReady
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        partition: 0
+    revisionHistoryLimit: 10
+parameters:
+- description: Maximum amount of memory the container can use.
+  displayName: Memory Limit
+  name: MEMORY_LIMIT
+  required: true
+  value: 512Mi
+- description: PersistentVolumeClaim size
+  displayName: Storage Size
+  name: PERSISTENT_SIZE
+  required: true
+  value: 1Gi
+- description: Number of nodes
+  display: Cluster nodes number
+  name: CLUSTER_SIZE
+  value: 3
+- description: The OpenShift Namespace where the ImageStream resides.
+  displayName: Namespace
+  name: NAMESPACE
+  value: openshift
+- description: The name of the OpenShift Service exposed for the database.
+  displayName: Database Service Name
+  name: DATABASE_SERVICE_NAME
+  required: true
+  value: redis
+- description: Password for the Redis connection user.
+  displayName: Redis Connection Password
+  from: '[a-zA-Z0-9]{16}'
+  generate: expression
+  name: REDIS_PASSWORD
+  required: true
+- description: Version of Redis image to be used (1, 1-7 or latest).
+  displayName: Version of Redis Image
+  name: REDIS_VERSION
+  required: true
+  value: 1-7
