@@ -167,7 +167,7 @@ objects:
       app: ${DATABASE_SERVICE_NAME}-master
       role: master
   spec:
-    replicas: ${CLUSTER_SIZE}
+    replicas: 3
     selector:
       matchLabels:
         app: ${DATABASE_SERVICE_NAME}-master
@@ -220,7 +220,7 @@ objects:
               - name: REDIS_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: redis
+                    name: ${DATABASE_SERVICE_NAME}
                     key: database-password
               - name: SETUP_MODE
                 value: cluster
@@ -268,7 +268,7 @@ objects:
       app: ${DATABASE_SERVICE_NAME}-slave
       role: slave
   spec:
-    replicas: ${CLUSTER_SIZE}
+    replicas: 3
     selector:
       matchLabels:
         app: ${DATABASE_SERVICE_NAME}-slave
@@ -321,7 +321,7 @@ objects:
               - name: REDIS_PASSWORD
                 valueFrom:
                   secretKeyRef:
-                    name: redis
+                    name: ${DATABASE_SERVICE_NAME}
                     key: database-password
               - name: SETUP_MODE
                 value: cluster
@@ -378,9 +378,9 @@ parameters:
   required: true
   value: 1Gi
 - description: Number of nodes
-  display: Cluster nodes number
+  displayName: Cluster nodes number
   name: CLUSTER_SIZE
-  value: 3
+  value: '3'
 - description: The OpenShift Namespace where the ImageStream resides.
   displayName: Namespace
   name: NAMESPACE
