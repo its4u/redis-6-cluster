@@ -18,7 +18,7 @@ data:
     fi
     if [[ "${SERVER_MODE}" == "master" || "${SERVER_MODE}" == "slave" ]]; then
       echo "cluster-enabled yes" >> /etc/redis.conf
-      sed -ri "/myself/s/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/${REDIS_NODE_IP}/" /var/lib/redis/data/nodes.conf
+      [ -f /var/lib/redis/data/nodes.conf ] && sed -ri "/myself/s/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/${REDIS_NODE_IP}/" /var/lib/redis/data/nodes.conf
     fi
     # Source post-init source if exists
     if [ -f ${CONTAINER_SCRIPTS_PATH}/post-init.sh ]; then
