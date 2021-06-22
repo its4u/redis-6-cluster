@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${DATABASE_SERVICE_NAME}-slave-headless
+  labels:
+    app: ${DATABASE_SERVICE_NAME}-slave
+    role: slave
+spec:
+  ports:
+    - name: redis-slave
+      protocol: TCP
+      port: 6379
+      targetPort: 6379
+  selector:
+    app: ${DATABASE_SERVICE_NAME}-slave
+    role: slave
+  clusterIP: None
+  clusterIPs:
+    - None
+  type: ClusterIP
+  sessionAffinity: None
+status:
+  loadBalancer: {}

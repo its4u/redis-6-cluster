@@ -1,0 +1,106 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${DATABASE_SERVICE_NAME}-slave
+  labels:
+    app: ${DATABASE_SERVICE_NAME}-slave
+    role: slave
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ${DATABASE_SERVICE_NAME}-slave
+      role: slave
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: ${DATABASE_SERVICE_NAME}-slave
+        role: slave
+    spec:
+      volumes:
+        - name: run-redis
+          configMap:
+            name: run-redis
+            defaultMode: 365
+      containers:
+        - resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - '-i'
+                - '-c'
+                - test "$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)" == "PONG"
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          terminationMessagePath: /dev/termination-log
+          name: redis-slave
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 30
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          env:
+            - name: SERVER_MODE
+              value: slave
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${DATABASE_SERVICE_NAME}
+                  key: database-password
+            - name: SETUP_MODE
+              value: cluster
+            - name: PERSISTENCE_ENABLED
+              value: 'true'
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: ${DATABASE_SERVICE_NAME}-slave
+              mountPath: /var/lib/redis/data/
+            - name: run-redis
+              mountPath: /usr/bin/run-redis
+              subPath: run-redis
+          terminationMessagePolicy: File
+          image: 'registry.redhat.io/rhel8/redis-6:latest'
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+    volumes:
+      - name: redis-config
+        configMap:
+          name: redis
+          defaultMode: 420
+  volumeClaimTemplates:
+    - kind: PersistentVolumeClaim
+      apiVersion: v1
+      metadata:
+        name: ${DATABASE_SERVICE_NAME}-slave
+        creationTimestamp: null
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: ${PERSISTENT_SIZE}
+        volumeMode: Filesystem
+  serviceName: ${DATABASE_SERVICE_NAME}-slave
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  revisionHistoryLimit: 10
