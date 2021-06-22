@@ -31,9 +31,9 @@ objects:
 - apiVersion: v1
   kind: Secret
   metadata:
+    name: ${DATABASE_SERVICE_NAME}
     annotations:
       template.openshift.io/expose-password: '{.data[''database-password'']}'
-    name: ${DATABASE_SERVICE_NAME}
   stringData:
     database-password: ${REDIS_PASSWORD}
 - apiVersion: v1
@@ -123,6 +123,9 @@ objects:
   status:
     loadBalancer: {}
 - apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: run-redis
   data:
     run-redis: |
       #!/bin/bash
@@ -157,9 +160,6 @@ objects:
       log_volume_info "${REDIS_DATADIR}"
       log_info 'Running final exec -- Only Redis logs after this point'
       exec ${REDIS_PREFIX}/bin/redis-server /etc/redis.conf --daemonize no "$@" 2>&1
-  kind: ConfigMap
-  metadata:
-    name: run-redis
 - apiVersion: apps/v1
   kind: StatefulSet
   metadata:
