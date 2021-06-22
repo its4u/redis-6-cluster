@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-redis-cluster
+spec:
+  parallelism: 1
+  completions: 1
+  activeDeadlineSeconds: 3600
+  backoffLimit: 3
+  template:
+    metadata:
+      name: create-redis-cluster
+    spec:
+      containers:
+      - name: create-redis-cluster
+        image: registry.redhat.io/openshift4/ose-cli
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis
+              key: database-password
+        - name: CURRENT_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        command:
+        - /usr/local/bin/create_cluster
+        volumeMounts:
+          - name: create-redis-cluster-script
+            mountPath: /usr/local/bin
+      restartPolicy: OnFailure
+      serviceAccountName: redis-cluster-admin
+      volumes:
+      - name: create-redis-cluster-script
+        configMap:
+          name: create-redis-cluster
+          defaultMode: 0755

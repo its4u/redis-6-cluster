@@ -2,11 +2,10 @@
 OLD_IFS="$IFS"
 IFS=$'\n'
 
-
 TEMPLATE=new-template.yml
 FOLDER=files
 
-cat $FOLDER/template.yml > $TEMPLATE
+cat $FOLDER/99-template.yml > $TEMPLATE
 echo "objects:" >> $TEMPLATE
 
 for f in $(ls $FOLDER | grep '.yml$' | grep -v "template.yml");

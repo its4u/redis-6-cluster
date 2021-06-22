@@ -97,6 +97,7 @@ spec:
           requests:
             storage: ${PERSISTENT_SIZE}
         volumeMode: Filesystem
+        storageClassName: redis-slave-sc
   serviceName: ${DATABASE_SERVICE_NAME}-slave
   podManagementPolicy: OrderedReady
   updateStrategy:

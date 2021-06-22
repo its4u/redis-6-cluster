@@ -96,6 +96,7 @@ spec:
           requests:
             storage: 1Gi
         volumeMode: Filesystem
+        storageClassName: redis-master-sc
   serviceName: ${DATABASE_SERVICE_NAME}-master
   podManagementPolicy: OrderedReady
   updateStrategy:
