@@ -6,18 +6,42 @@ data:
   create_cluster: |
     #!/bin/bash
 
-    # Wait for master-0 to be up
-    c=0;
-    while [[ $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending) ]]; 
-    do 
+    # Wait for pending masters
+    if [[ $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending) ]]; 
+    then 
       pod=$(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending | awk '{print $1}')
       echo "$pod still pending... Check Persistent Volumes"; 
-      ((c++)) && ((c==30)) && exit 1; 
-      sleep 10; 
-    done
+      sleep 30;
+      exit 1;
+    fi
+
+    # Wait for pending slaves
+    if [[ $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending) ]]; 
+    then
+      pod=$(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending | awk '{print $1}')
+      echo "$pod still pending... Check Persistent Volumes"; 
+      sleep 30;
+      exit 1;
+    fi
+
+    # Check for all masters
+    if [[ ! $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep "Running" | wc -l) == "3" ]];
+    then
+      echo "Not all master pods are running. Waiting a bit...";
+      sleep 30;
+      exit 1;
+    fi
+
+    # Check for all slaves
+    if [[ ! $(oc get pods -l role=slave -n ${CURRENT_NAMESPACE} | grep "Running" | wc -l) == "3" ]];
+    then
+      echo "Not all slave pods are running. Waiting a bit...";
+      sleep 30;
+      exit 1;
+    fi
 
     export REDIS_CLUSTER_CMD=$(oc get pods -l role=master -n ${CURRENT_NAMESPACE} -o go-template="{{\"/usr/bin/redis-cli --cluster create\"}}{{range .items}}{{\" \"}}{{.status.podIP}}{{\":6379\"}}{{end}}{{\" --cluster-yes -a $DB_PASSWORD\"}}")
-    oc exec -t ${DATABASE_SERVICE_NAME}-master-0 -n ${CURRENT_NAMESPACE} -c redis-master -- /bin/bash -c $REDIS_CLUSTER_CMD
+    oc exec -t ${DATABASE_SERVICE_NAME}-master-0 -n ${CURRENT_NAMESPACE} -c redis-master -- /bin/bash -c "$REDIS_CLUSTER_CMD"
     # Create replicas
     for NODE in 0 1 2
     do
@@ -25,3 +49,5 @@ data:
       SLAVE_IP=$(oc get pod ${DATABASE_SERVICE_NAME}-slave-${NODE} -n ${CURRENT_NAMESPACE} -o go-template='{{.status.podIP}}')
       oc exec -t ${DATABASE_SERVICE_NAME}-master-${NODE} -n ${CURRENT_NAMESPACE} -c redis-master -- /bin/bash -c "/usr/bin/redis-cli --cluster add-node ${SLAVE_IP}:6379 ${MASTER_IP}:6379 --cluster-slave -a $DB_PASSWORD"
     done
+
+    exit 0
