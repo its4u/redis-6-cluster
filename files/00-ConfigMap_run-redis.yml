@@ -12,7 +12,11 @@ data:
     # Process the Redis configuration files
     log_info 'Processing Redis configuration files ...'
     if [[ -v REDIS_PASSWORD ]]; then
-      envsubst < ${CONTAINER_SCRIPTS_PATH}/password.conf.template >> /etc/redis.conf
+      if [[ "${SERVER_MODE}" == "slave" ]]; then
+        echo "masterauth \"${REDIS_PASSWORD}\"" >> /etc/redis.conf
+      else
+        envsubst < ${CONTAINER_SCRIPTS_PATH}/password.conf.template >> /etc/redis.conf
+      fi
     else
       log_info 'WARNING: setting REDIS_PASSWORD is recommended'
     fi

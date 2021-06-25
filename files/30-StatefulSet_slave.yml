@@ -65,6 +65,10 @@ spec:
               value: cluster
             - name: PERSISTENCE_ENABLED
               value: 'true'
+            - name: REDIS_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
           imagePullPolicy: IfNotPresent
           volumeMounts:
             - name: ${DATABASE_SERVICE_NAME}-slave
