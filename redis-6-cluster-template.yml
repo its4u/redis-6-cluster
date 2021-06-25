@@ -141,9 +141,8 @@ objects:
       if [[ -v REDIS_PASSWORD ]]; then
         if [[ "${SERVER_MODE}" == "slave" ]]; then
           echo "masterauth \"${REDIS_PASSWORD}\"" >> /etc/redis.conf
-        else
-          envsubst < ${CONTAINER_SCRIPTS_PATH}/password.conf.template >> /etc/redis.conf
         fi
+        envsubst < ${CONTAINER_SCRIPTS_PATH}/password.conf.template >> /etc/redis.conf
       else
         log_info 'WARNING: setting REDIS_PASSWORD is recommended'
       fi
@@ -262,6 +261,7 @@ objects:
             requests:
               storage: ${PERSISTENT_SIZE}
           volumeMode: Filesystem
+          storageClassName: ${STORAGE_CLASS_NAME}
     serviceName: ${DATABASE_SERVICE_NAME}-master
     podManagementPolicy: OrderedReady
     updateStrategy:
@@ -372,6 +372,7 @@ objects:
             requests:
               storage: ${PERSISTENT_SIZE}
           volumeMode: Filesystem
+          storageClassName: ${STORAGE_CLASS_NAME}
     serviceName: ${DATABASE_SERVICE_NAME}-slave
     podManagementPolicy: OrderedReady
     updateStrategy:
@@ -414,3 +415,8 @@ parameters:
   name: REDIS_VERSION
   required: true
   value: 1-7
+- description: StorageClassName to be used
+  displayName: StorageClassName
+  name: STORAGE_CLASS_NAME
+  required: true
+  value: ocs-storagecluster-cephfs
