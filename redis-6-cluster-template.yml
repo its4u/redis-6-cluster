@@ -260,7 +260,7 @@ objects:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 1Gi
+              storage: ${PERSISTENT_SIZE}
           volumeMode: Filesystem
     serviceName: ${DATABASE_SERVICE_NAME}-master
     podManagementPolicy: OrderedReady
