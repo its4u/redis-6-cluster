@@ -33,15 +33,16 @@ parameters:
     name: MEMORY_LIMIT
     required: true
     value: 512Mi
+  - description: StorageClassName
+    displayName: Storage Class Name
+    name: STORAGE_CLASS_NAME
+    required: true
+    value: ocs-storagecluster-cephfs
   - description: PersistentVolumeClaim size
     displayName: Storage Size
     name: PERSISTENT_SIZE
     required: true
     value: 1Gi
-  - description: Number of nodes
-    displayName: Cluster nodes number
-    name: CLUSTER_SIZE
-    value: '3'
   - description: The OpenShift Namespace where the ImageStream resides.
     displayName: Namespace
     name: NAMESPACE
@@ -66,54 +67,9 @@ objects:
 - apiVersion: v1
   kind: ConfigMap
   metadata:
-    name: create-redis-cluster
-  data:
-    create_cluster: |
-      #!/bin/bash
-      # Wait for pending masters
-      if [[ $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending) ]]; 
-      then 
-        pod=$(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending | awk '{print $1}')
-        echo "$pod still pending... Check Persistent Volumes"; 
-        sleep 30;
-        exit 1;
-      fi
-      # Wait for pending slaves
-      if [[ $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending) ]]; 
-      then
-        pod=$(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep Pending | awk '{print $1}')
-        echo "$pod still pending... Check Persistent Volumes"; 
-        sleep 30;
-        exit 1;
-      fi
-      # Check for all masters
-      if [[ ! $(oc get pods -l role=master -n ${CURRENT_NAMESPACE} | grep "Running" | wc -l) == "3" ]];
-      then
-        echo "Not all master pods are running. Waiting a bit...";
-        sleep 30;
-        exit 1;
-      fi
-      # Check for all slaves
-      if [[ ! $(oc get pods -l role=slave -n ${CURRENT_NAMESPACE} | grep "Running" | wc -l) == "3" ]];
-      then
-        echo "Not all slave pods are running. Waiting a bit...";
-        sleep 30;
-        exit 1;
-      fi
-      export REDIS_CLUSTER_CMD=$(oc get pods -l role=master -n ${CURRENT_NAMESPACE} -o go-template="{{\"/usr/bin/redis-cli --cluster create\"}}{{range .items}}{{\" \"}}{{.status.podIP}}{{\":6379\"}}{{end}}{{\" --cluster-yes -a $DB_PASSWORD\"}}")
-      oc exec -t ${DATABASE_SERVICE_NAME}-master-0 -n ${CURRENT_NAMESPACE} -c redis-master -- /bin/bash -c "$REDIS_CLUSTER_CMD"
-      # Create replicas
-      for NODE in 0 1 2
-      do
-        MASTER_IP=$(oc get pod ${DATABASE_SERVICE_NAME}-master-${NODE} -n ${CURRENT_NAMESPACE} -o go-template='{{.status.podIP}}')
-        SLAVE_IP=$(oc get pod ${DATABASE_SERVICE_NAME}-slave-${NODE} -n ${CURRENT_NAMESPACE} -o go-template='{{.status.podIP}}')
-        oc exec -t ${DATABASE_SERVICE_NAME}-master-${NODE} -n ${CURRENT_NAMESPACE} -c redis-master -- /bin/bash -c "/usr/bin/redis-cli --cluster add-node ${SLAVE_IP}:6379 ${MASTER_IP}:6379 --cluster-slave -a $DB_PASSWORD"
-      done
-      exit 0
-- apiVersion: v1
-  kind: ConfigMap
-  metadata:
     name: run-redis
+    labels:
+      app: ${DATABASE_SERVICE_NAME}
   data:
     run-redis: |
       #!/bin/bash
@@ -124,14 +80,15 @@ objects:
       # Process the Redis configuration files
       log_info 'Processing Redis configuration files ...'
       if [[ -v REDIS_PASSWORD ]]; then
+        echo "masterauth \"${REDIS_PASSWORD}\"" >> /etc/redis.conf
         envsubst < ${CONTAINER_SCRIPTS_PATH}/password.conf.template >> /etc/redis.conf
       else
         log_info 'WARNING: setting REDIS_PASSWORD is recommended'
       fi
-      if [[ "${SERVER_MODE}" == "master" || "${SERVER_MODE}" == "slave" ]]; then
-        echo "cluster-enabled yes" >> /etc/redis.conf
-        [ -f /var/lib/redis/data/nodes.conf ] && sed -ri "/myself/s/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/${REDIS_NODE_IP}/" /var/lib/redis/data/nodes.conf
-      fi
+      echo "cluster-enabled yes" >> /etc/redis.conf
+      echo "cluster-require-full-coverage no" >> /etc/redis.conf
+      [ -f /var/lib/redis/data/nodes.conf ] && sed -ri "/myself/s/[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/${REDIS_NODE_IP}/" /var/lib/redis/data/nodes.conf
+      
       # Source post-init source if exists
       if [ -f ${CONTAINER_SCRIPTS_PATH}/post-init.sh ]; then
         log_info 'Sourcing post-init.sh ...'
@@ -148,90 +105,28 @@ objects:
     name: ${DATABASE_SERVICE_NAME}
     annotations:
       template.openshift.io/expose-password: '{.data[''database-password'']}'
+    labels:
+      app: ${DATABASE_SERVICE_NAME}
   stringData:
     database-password: ${REDIS_PASSWORD}
 - apiVersion: v1
   kind: Service
   metadata:
-    name: ${DATABASE_SERVICE_NAME}-master-headless
+    name: ${DATABASE_SERVICE_NAME}-headless
     labels:
-      app: ${DATABASE_SERVICE_NAME}-master
-      role: master
+      app: ${DATABASE_SERVICE_NAME}
   spec:
     ports:
-      - name: redis-master
+      - name: redis
         protocol: TCP
         port: 6379
         targetPort: 6379
     selector:
-      app: ${DATABASE_SERVICE_NAME}-master
+      app: ${DATABASE_SERVICE_NAME}
       role: master
     clusterIP: None
     clusterIPs:
       - None
-    type: ClusterIP
-    sessionAffinity: None
-  status:
-    loadBalancer: {}
-- apiVersion: v1
-  kind: Service
-  metadata:
-    name: ${DATABASE_SERVICE_NAME}-master
-    labels:
-      app: ${DATABASE_SERVICE_NAME}-master
-      role: master
-  spec:
-    ports:
-      - name: redis-master
-        protocol: TCP
-        port: 6379
-        targetPort: 6379
-    selector:
-      app: ${DATABASE_SERVICE_NAME}-master
-      role: master
-    type: ClusterIP
-    sessionAffinity: None
-  status:
-    loadBalancer: {}
-- apiVersion: v1
-  kind: Service
-  metadata:
-    name: ${DATABASE_SERVICE_NAME}-slave-headless
-    labels:
-      app: ${DATABASE_SERVICE_NAME}-slave
-      role: slave
-  spec:
-    ports:
-      - name: redis-slave
-        protocol: TCP
-        port: 6379
-        targetPort: 6379
-    selector:
-      app: ${DATABASE_SERVICE_NAME}-slave
-      role: slave
-    clusterIP: None
-    clusterIPs:
-      - None
-    type: ClusterIP
-    sessionAffinity: None
-  status:
-    loadBalancer: {}
-- apiVersion: v1
-  kind: Service
-  metadata:
-    name: ${DATABASE_SERVICE_NAME}-slave
-    labels:
-      app: ${DATABASE_SERVICE_NAME}-slave
-      role: slave
-  spec:
-    ports:
-      - name: redis-slave
-        protocol: TCP
-        port: 6379
-        targetPort: 6379
-    selector:
-      app: ${DATABASE_SERVICE_NAME}-slave
-      role: slave
     type: ClusterIP
     sessionAffinity: None
   status:
@@ -240,10 +135,14 @@ objects:
   kind: ServiceAccount
   metadata:
     name: redis-cluster-admin
+    labels:
+      app: ${DATABASE_SERVICE_NAME}
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: RoleBinding
   metadata:
     name: admin-to-redis-cluster-admin
+    labels:
+      app: ${DATABASE_SERVICE_NAME}
   subjects:
     - kind: ServiceAccount
       name: redis-cluster-admin
@@ -253,23 +152,33 @@ objects:
 - apiVersion: apps/v1
   kind: StatefulSet
   metadata:
-    name: ${DATABASE_SERVICE_NAME}-master
+    name: ${DATABASE_SERVICE_NAME}-shard-a
     labels:
-      app: ${DATABASE_SERVICE_NAME}-master
-      role: master
+      app: ${DATABASE_SERVICE_NAME}
+      role: node-shard-a
   spec:
-    replicas: 3
+    replicas: 2
     selector:
       matchLabels:
-        app: ${DATABASE_SERVICE_NAME}-master
-        role: master
+        app: ${DATABASE_SERVICE_NAME}
+        role: node-shard-a
     template:
       metadata:
         creationTimestamp: null
         labels:
-          app: ${DATABASE_SERVICE_NAME}-master
-          role: master
+          app: ${DATABASE_SERVICE_NAME}
+          role: node-shard-a
       spec:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                  - node-shard-a
+              topologyKey: kubernetes.io/hostname
         volumes:
           - name: run-redis
             configMap:
@@ -296,7 +205,7 @@ objects:
               successThreshold: 1
               failureThreshold: 3
             terminationMessagePath: /dev/termination-log
-            name: redis-master
+            name: redis
             livenessProbe:
               tcpSocket:
                 port: 6379
@@ -306,8 +215,6 @@ objects:
               successThreshold: 1
               failureThreshold: 3
             env:
-              - name: SERVER_MODE
-                value: master
               - name: REDIS_PASSWORD
                 valueFrom:
                   secretKeyRef:
@@ -323,7 +230,7 @@ objects:
                     fieldPath: status.podIP
             imagePullPolicy: IfNotPresent
             volumeMounts:
-              - name: ${DATABASE_SERVICE_NAME}-master
+              - name: ${DATABASE_SERVICE_NAME}-shard-a
                 mountPath: /var/lib/redis/data/
               - name: run-redis
                 mountPath: /usr/bin/run-redis
@@ -339,7 +246,7 @@ objects:
       - kind: PersistentVolumeClaim
         apiVersion: v1
         metadata:
-          name: ${DATABASE_SERVICE_NAME}-master
+          name: ${DATABASE_SERVICE_NAME}-shard-a
           creationTimestamp: null
         spec:
           accessModes:
@@ -348,8 +255,8 @@ objects:
             requests:
               storage: 1Gi
           volumeMode: Filesystem
-          # storageClassName: redis-master-sc
-    serviceName: ${DATABASE_SERVICE_NAME}-master
+          storageClassName: ${STORAGE_CLASS_NAME}
+    serviceName: ${DATABASE_SERVICE_NAME}-shard-a
     podManagementPolicy: OrderedReady
     updateStrategy:
       type: RollingUpdate
@@ -359,23 +266,33 @@ objects:
 - apiVersion: apps/v1
   kind: StatefulSet
   metadata:
-    name: ${DATABASE_SERVICE_NAME}-slave
+    name: ${DATABASE_SERVICE_NAME}-shard-b
     labels:
-      app: ${DATABASE_SERVICE_NAME}-slave
-      role: slave
+      app: ${DATABASE_SERVICE_NAME}
+      role: node-shard-b
   spec:
-    replicas: 3
+    replicas: 2
     selector:
       matchLabels:
-        app: ${DATABASE_SERVICE_NAME}-slave
-        role: slave
+        app: ${DATABASE_SERVICE_NAME}
+        role: node-shard-b
     template:
       metadata:
         creationTimestamp: null
         labels:
-          app: ${DATABASE_SERVICE_NAME}-slave
-          role: slave
+          app: ${DATABASE_SERVICE_NAME}
+          role: node-shard-b
       spec:
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                  - node-shard-b
+              topologyKey: kubernetes.io/hostname
         volumes:
           - name: run-redis
             configMap:
@@ -402,7 +319,7 @@ objects:
               successThreshold: 1
               failureThreshold: 3
             terminationMessagePath: /dev/termination-log
-            name: redis-slave
+            name: redis
             livenessProbe:
               tcpSocket:
                 port: 6379
@@ -412,8 +329,6 @@ objects:
               successThreshold: 1
               failureThreshold: 3
             env:
-              - name: SERVER_MODE
-                value: slave
               - name: REDIS_PASSWORD
                 valueFrom:
                   secretKeyRef:
@@ -423,9 +338,13 @@ objects:
                 value: cluster
               - name: PERSISTENCE_ENABLED
                 value: 'true'
+              - name: REDIS_NODE_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
             imagePullPolicy: IfNotPresent
             volumeMounts:
-              - name: ${DATABASE_SERVICE_NAME}-slave
+              - name: ${DATABASE_SERVICE_NAME}-shard-b
                 mountPath: /var/lib/redis/data/
               - name: run-redis
                 mountPath: /usr/bin/run-redis
@@ -437,67 +356,138 @@ objects:
         dnsPolicy: ClusterFirst
         securityContext: {}
         schedulerName: default-scheduler
-      volumes:
-        - name: redis-config
-          configMap:
-            name: redis
-            defaultMode: 420
     volumeClaimTemplates:
       - kind: PersistentVolumeClaim
         apiVersion: v1
         metadata:
-          name: ${DATABASE_SERVICE_NAME}-slave
+          name: ${DATABASE_SERVICE_NAME}-shard-b
           creationTimestamp: null
         spec:
           accessModes:
             - ReadWriteOnce
           resources:
             requests:
-              storage: ${PERSISTENT_SIZE}
+              storage: 1Gi
           volumeMode: Filesystem
-          # storageClassName: redis-slave-sc
-    serviceName: ${DATABASE_SERVICE_NAME}-slave
+          storageClassName: ${STORAGE_CLASS_NAME}
+    serviceName: ${DATABASE_SERVICE_NAME}-shard-b
     podManagementPolicy: OrderedReady
     updateStrategy:
       type: RollingUpdate
       rollingUpdate:
         partition: 0
     revisionHistoryLimit: 10
-- apiVersion: batch/v1
-  kind: Job
+- apiVersion: apps/v1
+  kind: StatefulSet
   metadata:
-    name: create-redis-cluster
+    name: ${DATABASE_SERVICE_NAME}-shard-c
+    labels:
+      app: ${DATABASE_SERVICE_NAME}
+      role: node-shard-c
   spec:
-    parallelism: 1
-    completions: 1
-    activeDeadlineSeconds: 3600
-    backoffLimit: 20
+    replicas: 2
+    selector:
+      matchLabels:
+        app: ${DATABASE_SERVICE_NAME}
+        role: node-shard-c
     template:
       metadata:
-        name: create-redis-cluster
+        creationTimestamp: null
+        labels:
+          app: ${DATABASE_SERVICE_NAME}
+          role: node-shard-c
       spec:
-        containers:
-        - name: create-redis-cluster
-          image: registry.redhat.io/openshift4/ose-cli
-          env:
-          - name: DB_PASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: redis
-                key: database-password
-          - name: CURRENT_NAMESPACE
-            valueFrom:
-              fieldRef:
-                fieldPath: metadata.namespace
-          command:
-          - /usr/local/bin/create_cluster
-          volumeMounts:
-            - name: create-redis-cluster-script
-              mountPath: /usr/local/bin
-        restartPolicy: OnFailure
-        serviceAccountName: redis-cluster-admin
+        affinity:
+          podAntiAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                - key: role
+                  operator: In
+                  values:
+                  - node-shard-c
+              topologyKey: kubernetes.io/hostname
         volumes:
-        - name: create-redis-cluster-script
-          configMap:
-            name: create-redis-cluster
-            defaultMode: 0755
+          - name: run-redis
+            configMap:
+              name: run-redis
+              defaultMode: 365
+        containers:
+          - resources:
+              limits:
+                cpu: 100m
+                memory: 128Mi
+              requests:
+                cpu: 100m
+                memory: 128Mi
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/sh
+                  - '-i'
+                  - '-c'
+                  - test "$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)" == "PONG"
+              initialDelaySeconds: 5
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            terminationMessagePath: /dev/termination-log
+            name: redis
+            livenessProbe:
+              tcpSocket:
+                port: 6379
+              initialDelaySeconds: 30
+              timeoutSeconds: 1
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+            env:
+              - name: REDIS_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: ${DATABASE_SERVICE_NAME}
+                    key: database-password
+              - name: SETUP_MODE
+                value: cluster
+              - name: PERSISTENCE_ENABLED
+                value: 'true'
+              - name: REDIS_NODE_IP
+                valueFrom:
+                  fieldRef:
+                    fieldPath: status.podIP
+            imagePullPolicy: IfNotPresent
+            volumeMounts:
+              - name: ${DATABASE_SERVICE_NAME}-shard-c
+                mountPath: /var/lib/redis/data/
+              - name: run-redis
+                mountPath: /usr/bin/run-redis
+                subPath: run-redis
+            terminationMessagePolicy: File
+            image: 'registry.redhat.io/rhel8/redis-6:latest'
+        restartPolicy: Always
+        terminationGracePeriodSeconds: 30
+        dnsPolicy: ClusterFirst
+        securityContext: {}
+        schedulerName: default-scheduler
+    volumeClaimTemplates:
+      - kind: PersistentVolumeClaim
+        apiVersion: v1
+        metadata:
+          name: ${DATABASE_SERVICE_NAME}-shard-c
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+          volumeMode: Filesystem
+          storageClassName: ${STORAGE_CLASS_NAME}
+    serviceName: ${DATABASE_SERVICE_NAME}-shard-c
+    podManagementPolicy: OrderedReady
+    updateStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        partition: 0
+    revisionHistoryLimit: 10

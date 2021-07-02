@@ -1,23 +1,33 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: ${DATABASE_SERVICE_NAME}-slave
+  name: ${DATABASE_SERVICE_NAME}-shard-b
   labels:
-    app: ${DATABASE_SERVICE_NAME}-slave
-    role: slave
+    app: ${DATABASE_SERVICE_NAME}
+    role: node-shard-b
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
-      app: ${DATABASE_SERVICE_NAME}-slave
-      role: slave
+      app: ${DATABASE_SERVICE_NAME}
+      role: node-shard-b
   template:
     metadata:
       creationTimestamp: null
       labels:
-        app: ${DATABASE_SERVICE_NAME}-slave
-        role: slave
+        app: ${DATABASE_SERVICE_NAME}
+        role: node-shard-b
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: role
+                operator: In
+                values:
+                - node-shard-b
+            topologyKey: kubernetes.io/hostname
       volumes:
         - name: run-redis
           configMap:
@@ -44,7 +54,7 @@ spec:
             successThreshold: 1
             failureThreshold: 3
           terminationMessagePath: /dev/termination-log
-          name: redis-slave
+          name: redis
           livenessProbe:
             tcpSocket:
               port: 6379
@@ -54,8 +64,6 @@ spec:
             successThreshold: 1
             failureThreshold: 3
           env:
-            - name: SERVER_MODE
-              value: slave
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -71,7 +79,7 @@ spec:
                   fieldPath: status.podIP
           imagePullPolicy: IfNotPresent
           volumeMounts:
-            - name: ${DATABASE_SERVICE_NAME}-slave
+            - name: ${DATABASE_SERVICE_NAME}-shard-b
               mountPath: /var/lib/redis/data/
             - name: run-redis
               mountPath: /usr/bin/run-redis
@@ -83,26 +91,21 @@ spec:
       dnsPolicy: ClusterFirst
       securityContext: {}
       schedulerName: default-scheduler
-    volumes:
-      - name: redis-config
-        configMap:
-          name: redis
-          defaultMode: 420
   volumeClaimTemplates:
     - kind: PersistentVolumeClaim
       apiVersion: v1
       metadata:
-        name: ${DATABASE_SERVICE_NAME}-slave
+        name: ${DATABASE_SERVICE_NAME}-shard-b
         creationTimestamp: null
       spec:
         accessModes:
           - ReadWriteOnce
         resources:
           requests:
-            storage: ${PERSISTENT_SIZE}
+            storage: 1Gi
         volumeMode: Filesystem
-        # storageClassName: redis-slave-sc
-  serviceName: ${DATABASE_SERVICE_NAME}-slave
+        storageClassName: ${STORAGE_CLASS_NAME}
+  serviceName: ${DATABASE_SERVICE_NAME}-shard-b
   podManagementPolicy: OrderedReady
   updateStrategy:
     type: RollingUpdate

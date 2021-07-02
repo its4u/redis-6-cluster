@@ -2,6 +2,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: admin-to-redis-cluster-admin
+  labels:
+    app: ${DATABASE_SERVICE_NAME}
 subjects:
   - kind: ServiceAccount
     name: redis-cluster-admin

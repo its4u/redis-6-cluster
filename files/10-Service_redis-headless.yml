@@ -1,19 +1,21 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${DATABASE_SERVICE_NAME}-slave
+  name: ${DATABASE_SERVICE_NAME}-headless
   labels:
-    app: ${DATABASE_SERVICE_NAME}-slave
-    role: slave
+    app: ${DATABASE_SERVICE_NAME}
 spec:
   ports:
-    - name: redis-slave
+    - name: redis
       protocol: TCP
       port: 6379
       targetPort: 6379
   selector:
-    app: ${DATABASE_SERVICE_NAME}-slave
-    role: slave
+    app: ${DATABASE_SERVICE_NAME}
+    role: master
+  clusterIP: None
+  clusterIPs:
+    - None
   type: ClusterIP
   sessionAffinity: None
 status:

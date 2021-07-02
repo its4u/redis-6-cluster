@@ -1,23 +1,33 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: ${DATABASE_SERVICE_NAME}-master
+  name: ${DATABASE_SERVICE_NAME}-shard-c
   labels:
-    app: ${DATABASE_SERVICE_NAME}-master
-    role: master
+    app: ${DATABASE_SERVICE_NAME}
+    role: node-shard-c
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
-      app: ${DATABASE_SERVICE_NAME}-master
-      role: master
+      app: ${DATABASE_SERVICE_NAME}
+      role: node-shard-c
   template:
     metadata:
       creationTimestamp: null
       labels:
-        app: ${DATABASE_SERVICE_NAME}-master
-        role: master
+        app: ${DATABASE_SERVICE_NAME}
+        role: node-shard-c
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: role
+                operator: In
+                values:
+                - node-shard-c
+            topologyKey: kubernetes.io/hostname
       volumes:
         - name: run-redis
           configMap:
@@ -44,7 +54,7 @@ spec:
             successThreshold: 1
             failureThreshold: 3
           terminationMessagePath: /dev/termination-log
-          name: redis-master
+          name: redis
           livenessProbe:
             tcpSocket:
               port: 6379
@@ -54,8 +64,6 @@ spec:
             successThreshold: 1
             failureThreshold: 3
           env:
-            - name: SERVER_MODE
-              value: master
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -71,7 +79,7 @@ spec:
                   fieldPath: status.podIP
           imagePullPolicy: IfNotPresent
           volumeMounts:
-            - name: ${DATABASE_SERVICE_NAME}-master
+            - name: ${DATABASE_SERVICE_NAME}-shard-c
               mountPath: /var/lib/redis/data/
             - name: run-redis
               mountPath: /usr/bin/run-redis
@@ -87,7 +95,7 @@ spec:
     - kind: PersistentVolumeClaim
       apiVersion: v1
       metadata:
-        name: ${DATABASE_SERVICE_NAME}-master
+        name: ${DATABASE_SERVICE_NAME}-shard-c
         creationTimestamp: null
       spec:
         accessModes:
@@ -96,8 +104,8 @@ spec:
           requests:
             storage: 1Gi
         volumeMode: Filesystem
-        # storageClassName: redis-master-sc
-  serviceName: ${DATABASE_SERVICE_NAME}-master
+        storageClassName: ${STORAGE_CLASS_NAME}
+  serviceName: ${DATABASE_SERVICE_NAME}-shard-c
   podManagementPolicy: OrderedReady
   updateStrategy:
     type: RollingUpdate

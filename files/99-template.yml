@@ -33,15 +33,16 @@ parameters:
     name: MEMORY_LIMIT
     required: true
     value: 512Mi
+  - description: StorageClassName
+    displayName: Storage Class Name
+    name: STORAGE_CLASS_NAME
+    required: true
+    value: ocs-storagecluster-cephfs
   - description: PersistentVolumeClaim size
     displayName: Storage Size
     name: PERSISTENT_SIZE
     required: true
     value: 1Gi
-  - description: Number of nodes
-    displayName: Cluster nodes number
-    name: CLUSTER_SIZE
-    value: '3'
   - description: The OpenShift Namespace where the ImageStream resides.
     displayName: Namespace
     name: NAMESPACE

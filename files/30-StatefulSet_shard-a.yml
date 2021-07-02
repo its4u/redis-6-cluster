@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${DATABASE_SERVICE_NAME}-shard-a
+  labels:
+    app: ${DATABASE_SERVICE_NAME}
+    role: node-shard-a
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ${DATABASE_SERVICE_NAME}
+      role: node-shard-a
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: ${DATABASE_SERVICE_NAME}
+        role: node-shard-a
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: role
+                operator: In
+                values:
+                - node-shard-a
+            topologyKey: kubernetes.io/hostname
+      volumes:
+        - name: run-redis
+          configMap:
+            name: run-redis
+            defaultMode: 365
+      containers:
+        - resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - '-i'
+                - '-c'
+                - test "$(redis-cli -h 127.0.0.1 -a $REDIS_PASSWORD ping)" == "PONG"
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          terminationMessagePath: /dev/termination-log
+          name: redis
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 30
+            timeoutSeconds: 1
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${DATABASE_SERVICE_NAME}
+                  key: database-password
+            - name: SETUP_MODE
+              value: cluster
+            - name: PERSISTENCE_ENABLED
+              value: 'true'
+            - name: REDIS_NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: ${DATABASE_SERVICE_NAME}-shard-a
+              mountPath: /var/lib/redis/data/
+            - name: run-redis
+              mountPath: /usr/bin/run-redis
+              subPath: run-redis
+          terminationMessagePolicy: File
+          image: 'registry.redhat.io/rhel8/redis-6:latest'
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  volumeClaimTemplates:
+    - kind: PersistentVolumeClaim
+      apiVersion: v1
+      metadata:
+        name: ${DATABASE_SERVICE_NAME}-shard-a
+        creationTimestamp: null
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+        volumeMode: Filesystem
+        storageClassName: ${STORAGE_CLASS_NAME}
+  serviceName: ${DATABASE_SERVICE_NAME}-shard-a
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  revisionHistoryLimit: 10
