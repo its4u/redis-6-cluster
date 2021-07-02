@@ -20,7 +20,7 @@ This template requires 6 PersistentVolumes in order to bind automatically create
 Available parameters are:
 - DATABASE_SERVICE_NAME is cluster name (default: redis)
 - MEMORY_LIMIT is all pod memory limit (default: 512Mi)
-- CLUSTER_SIZE is number of master and replica nodes (3 is the only supported value)
+- STORAGE_CLASS_NAME is storage class to use (default: ocs-storagecluster-cephfs
 - PERSISTENT_SIZE is PV size (default: 1Gi)
 - NAMESPACE is the project that hosts redis 6 ImageStream (default: openshift)
 - REDIS_PASSWORD is database password (default: generated)
