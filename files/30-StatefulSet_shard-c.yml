@@ -106,7 +106,7 @@ spec:
         volumeMode: Filesystem
         storageClassName: ${STORAGE_CLASS_NAME}
   serviceName: ${DATABASE_SERVICE_NAME}-shard-c
-  podManagementPolicy: OrderedReady
+  podManagementPolicy: Parallel
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:

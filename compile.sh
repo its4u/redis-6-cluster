@@ -2,7 +2,7 @@
 OLD_IFS="$IFS"
 IFS=$'\n'
 
-TEMPLATE=new-template.yml
+TEMPLATE=redis-6-cluster-template.yml
 FOLDER=files
 
 cat $FOLDER/99-template.yml > $TEMPLATE
